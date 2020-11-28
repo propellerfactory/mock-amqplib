@@ -139,6 +139,34 @@ test('headers exchange', async () => {
   expect(await channel.get('retry-queue-20s')).toMatchObject({ content: 'content-2'});
 });
 
+test('topic exchange', async () => {
+  const connection = await amqp.connect('some-random-uri');
+  const channel = await connection.createChannel();
+
+  await channel.assertExchange('topic-exchange', 'topic');
+  await channel.assertQueue('topic-queue');
+  await channel.bindQueue('topic-queue', 'topic-exchange', '#.foo.*');
+
+  await channel.publish('topic-exchange', 'bar.foo.stuff', 'content-1');
+  await channel.publish('topic-exchange', 'foo', 'content-2');
+  await channel.publish('topic-exchange', 'bar.baz.foo.stuff', 'content-3');
+
+  expect(await channel.get('topic-queue')).toMatchObject({
+    content: 'content-1',
+    fields: {
+      exchange: 'topic-exchange',
+      routingKey: 'bar.foo.stuff'
+    }
+  });
+  expect(await channel.get('topic-queue')).toMatchObject({
+    content: 'content-3',
+    fields: {
+      exchange: 'topic-exchange',
+      routingKey: 'bar.baz.foo.stuff'
+    }
+  });
+});
+
 test('emitting on a channel triggers on callbacks', async () => {
   const connection = await amqp.connect('some-random-uri');
   const channel = await connection.createChannel();
@@ -181,3 +209,4 @@ it('should not put nack-ed messages back to queue if requeue is set to false', a
 
   expect(reRead).toEqual(false);
 });
+

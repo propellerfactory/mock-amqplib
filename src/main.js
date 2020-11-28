@@ -54,6 +54,9 @@ const createDirectExchange = () => {
     },
     getTargetQueues: (routingKey, options = {}) => {
       const matchingBinding = bindings.find(binding => binding.pattern === routingKey);
+      if( !matchingBinding ) {
+        return []
+      }
       return [matchingBinding.targetQueue];
     }
   };
@@ -73,6 +76,44 @@ const createHeadersExchange = () => {
       const isMatching = (binding, headers) =>
         Object.keys(binding.options).every(key => binding.options[key] === headers[key]);
       const matchingBinding = bindings.find(binding => isMatching(binding, options.headers || {}));
+      if( !matchingBinding ) {
+        return []
+      }
+      return [matchingBinding.targetQueue];
+    }
+  };
+};
+
+const createTopicExchange = () => {
+  const bindings = [];
+  return {
+    bindQueue: (queueName, pattern, options) => {
+      bindings.push({
+        targetQueue: queueName,
+        options,
+        pattern,
+        regexp: new RegExp(pattern.split('.').map(patternPart => {
+          if( patternPart === '*') {
+            return `[^\.]+`
+          } else if( patternPart === '#' ) {
+            return `.+`
+          } else {
+            return patternPart
+          }
+        }).join("\\."), 'g')
+      });
+    },
+    getTargetQueues: (routingKey, options = {}) => {
+      const matchingBinding = bindings.find(binding => {
+        const matches = routingKey.match(binding.regexp)
+        if( !matches ) {
+          return false
+        }
+        return matches.find(candidate => candidate === routingKey)
+      })
+      if( !matchingBinding ) {
+        return []
+      }
       return [matchingBinding.targetQueue];
     }
   };
@@ -106,7 +147,10 @@ const createChannel = async () => ({
       case 'headers':
         exchange = createHeadersExchange();
         break;
-    }
+      case 'topic':
+        exchange = createTopicExchange();
+        break;
+      }
 
     exchanges[exchangeName] = exchange;
   },
@@ -144,9 +188,9 @@ const createChannel = async () => ({
     return queues[queueName].get();
   },
   prefetch: async () => {},
-  consume: async (queueName, consumer) => {
+  consume: async (queueName, consumer, options) => {
     queues[queueName].addConsumer(consumer);
-    return { consumerTag: queueName };
+    return { consumerTag: options && options.consumerTag ? options.consumerTag : queueName };
   },
   cancel: async consumerTag => queues[consumerTag].stopConsume(),
   ack: async () => {},
@@ -159,7 +203,8 @@ const createChannel = async () => ({
     queue: queueName,
     messageCount: queues[queueName].getMessageCount()
   }),
-  purgeQueue: queueName => queues[queueName].purge()
+  purgeQueue: queueName => queues[queueName].purge(),
+  close: async () => {},
 });
 
 module.exports = {
